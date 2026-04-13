@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>NESO EAC Auction Results – EFA Day Extract</title>
+<style>
+  body { font-family: Arial, sans-serif; margin: 30px; }
+  label { display: inline-block; }
+  input[type="date"] { padding: 5px; margin-right: 20px; }
+  button { padding: 6px 12px; margin: 5px; }
+  .downloads div { margin: 10px 0; }
+  .downloads a { display: inline-block; margin-top: 5px; margin-right: 10px; }
+
+  /* Vertical list for radio buttons, no wrapping */
+  .dataset-option {
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap; /* prevents wrapping */
+    font-size: 15px;
+  }
+
+  /* Row layout for datepickers */
+  .date-row {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    margin-bottom: 15px;
+  }
+</style>
+</head>
+<body>
+
+<h2>NESO EAC Auction Results – EFA Day Extract</h2>
+
+<!-- Dataset radio buttons (vertical list, no wrapping) -->
+<div>
+  <strong>Select Dataset:</strong><br><br>
+
+  <label class="dataset-option">
+    <input type="radio" name="dataset" value="596f29ac-0387-4ba4-a6d3-95c243140707" checked>
+    NESO Response-Reserve Results Summary
+  </label>
+
+  <label class="dataset-option">
+    <input type="radio" name="dataset" value="1cf68f59-8eb8-4f1d-bccf-11b5a47b24e5">
+    NESO Response-Reserve Buy Orders
+  </label>
+
+  <label class="dataset-option">
+    <input type="radio" name="dataset" value="13b511df-d6ec-4143-afb1-0ecc6fd19810">
+    NESO Response-Reserve Sell Orders
+  </label>
+
+  <label class="dataset-option">
+    <input type="radio" name="dataset" value="a63ab354-7e68-44c2-ad96-c6f920c30e85">
+    NESO Response-Reserve Results By Unit
+  </label>
+</div>
+
+<h3>Select EFA Date Range</h3>
+
+<!-- Datepickers in a row -->
+<div class="date-row">
+  <label>From (EFA Day):</label>
+  <input type="date" id="fromDate">
+
+  <label>To (EFA Day):</label>
+  <input type="date" id="toDate">
+</div>
+
+<button id="downloadBtn">Download Data</button>
+
+<h3>Quick Links</h3>
+<button id="last1">Last 1 EFA Day</button>
+<button id="last7">Last 7 EFA Days</button>
+<button id="last15">Last 15 EFA Days</button>
+<button id="last30">Last 30 EFA Days</button>
+
+<h2>Results</h2>
+<div id="resourceLinks" class="downloads"></div>
+
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+
+// ---------------------------------------------------------
+// 1. UK-local → ISO8601 converter (BST/GMT safe)
+// ---------------------------------------------------------
+function makeUKDateISO(dateStr, hour, minute) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+
+  const utc = new Date(Date.UTC(y, m - 1, d, hour, minute));
+
+  const ukOffsetMinutes = new Date(
+    utc.toLocaleString("en-US", { timeZone: "Europe/London" })
+  ).getTimezoneOffset();
+
+  const ukTime = new Date(utc.getTime() - ukOffsetMinutes * 60000);
+
+  return ukTime.toISOString();
+}
+
+function efaStartISO(dateStr) {
+  return makeUKDateISO(dateStr, 22, 0);
+}
+
+function efaEndISO(dateStr) {
+  return makeUKDateISO(dateStr, 21, 30);
+}
+
+// ---------------------------------------------------------
+// 2. Datepicker limits (last 4 years → tomorrow)
+// ---------------------------------------------------------
+const today = new Date();
+const tomorrow = new Date(today.getTime() + 86400000);
+const fourYearsAgo = new Date(today.getTime() - 4 * 365 * 86400000);
+
+const maxDate = tomorrow.toISOString().split("T")[0];
+const minDate = fourYearsAgo.toISOString().split("T")[0];
+
+const fromInput = document.getElementById("fromDate");
+const toInput = document.getElementById("toDate");
+
+fromInput.max = maxDate;
+toInput.max = maxDate;
+
+fromInput.min = minDate;
+toInput.min = minDate;
+
+// ---------------------------------------------------------
+// 3. Default datepickers = today/tomorrow
+// ---------------------------------------------------------
+fromInput.value = today.toISOString().split("T")[0];
+toInput.value = maxDate;
+
+// ---------------------------------------------------------
+// 4. Dynamic min/max logic
+// ---------------------------------------------------------
+
+fromInput.addEventListener("change", () => {
+  const from = new Date(fromInput.value);
+  if (isNaN(from)) return;
+
+  const minTo = new Date(from.getTime() + 86400000);
+  toInput.min = minTo.toISOString().split("T")[0];
+  toInput.max = maxDate;
+
+  if (new Date(toInput.value) < minTo) {
+    toInput.value = minTo.toISOString().split("T")[0];
+  }
+});
+
+toInput.addEventListener("change", () => {
+  const to = new Date(toInput.value);
+  if (isNaN(to)) return;
+
+  const maxFrom = new Date(to.getTime() - 86400000);
+  fromInput.max = maxFrom.toISOString().split("T")[0];
+  fromInput.min = minDate;
+
+  if (new Date(fromInput.value) > maxFrom) {
+    fromInput.value = maxFrom.toISOString().split("T")[0];
+  }
+});
+
+// ---------------------------------------------------------
+// 5. JSON → CSV converter
+// ---------------------------------------------------------
+function jsonToCsv(records) {
+  if (!records || records.length === 0) return "";
+
+  const headers = Object.keys(records[0]);
+  const escape = (value) => {
+    if (value === null || value === undefined) return "";
+    const str = String(value);
+    if (/[",\n\r]/.test(str)) {
+      return '"' + str.replace(/"/g, '""') + '"';
+    }
+    return str;
+  };
+
+  const lines = [];
+  lines.push(headers.join(","));
+  for (const row of records) {
+    const line = headers.map(h => escape(row[h])).join(",");
+    lines.push(line);
+  }
+  return lines.join("\r\n");
+}
+
+// ---------------------------------------------------------
+// 6. SQL query (fast SELECT *)
+// ---------------------------------------------------------
+function runQuery(resourceId, startISO, endISO) {
+  const sql = `
+    SELECT *
+    FROM "${resourceId}"
+    WHERE "deliveryStart" BETWEEN '${startISO}' AND '${endISO}'
+  `;
+
+  return fetch(
+    "https://api.neso.energy/api/3/action/datastore_search_sql?sql=" +
+    encodeURIComponent(sql)
+  )
+    .then(r => r.json())
+    .then(j => j.result)
+    .catch(err => ({ error: err.message }));
+}
+
+// ---------------------------------------------------------
+// 7. Run query + build download links
+// ---------------------------------------------------------
+function runQueryForSelectedDataset(startISO, endISO) {
+  const container = document.getElementById("resourceLinks");
+  container.innerHTML = `<p>Fetching data for ${startISO} → ${endISO}...</p>`;
+
+  const selected = document.querySelector("input[name='dataset']:checked");
+  const resourceId = selected.value;
+  const resourceName = selected.parentNode.innerText.trim();
+  const safeName = resourceName;
+
+  runQuery(resourceId, startISO, endISO).then(result => {
+    container.innerHTML = "";
+
+    if (result.error) {
+      container.innerHTML = `<div><strong>${resourceName}:</strong> Error: ${result.error}</div>`;
+      return;
+    }
+
+    if (result.records && result.records.length > 0) {
+
+      const cleanedRecords = result.records.map(r => {
+        const copy = { ...r };
+        delete copy._full_text;
+        return copy;
+      });
+
+      const jsonBlob = new Blob(
+        [JSON.stringify(cleanedRecords, null, 2)],
+        { type: "application/json" }
+      );
+      const jsonUrl = URL.createObjectURL(jsonBlob);
+      const jsonFileName = `${safeName}_${startISO}_${endISO}.json`;
+
+      const csvText = jsonToCsv(cleanedRecords);
+      const csvBlob = new Blob([csvText], { type: "text/csv;charset=utf-8;" });
+      const csvUrl = URL.createObjectURL(csvBlob);
+      const csvFileName = `${safeName}_${startISO}_${endISO}.csv`;
+
+      container.innerHTML = `
+        <div>
+          <strong>${resourceName}</strong><br>
+          Records: ${cleanedRecords.length}<br>
+          <a href="${jsonUrl}" download="${jsonFileName}">Download JSON</a>
+          <a href="${csvUrl}" download="${csvFileName}">Download CSV</a>
+        </div>
+      `;
+    } else {
+      container.innerHTML = `<div><strong>${resourceName}:</strong> No data for this EFA range.</div>`;
+    }
+  });
+}
+
+// ---------------------------------------------------------
+// 8. Download button (with validation)
+// ---------------------------------------------------------
+document.getElementById("downloadBtn").onclick = () => {
+  const from = fromInput.value;
+  const to = toInput.value;
+
+  if (!from || !to) {
+    alert("Please select both dates.");
+    return;
+  }
+
+  const fromD = new Date(from);
+  const toD = new Date(to);
+
+  if (fromD >= toD) {
+    alert("EFA rule: To date must be at least 1 day after From date.");
+    return;
+  }
+
+  const startISO = efaStartISO(from);
+  const endISO = efaEndISO(to);
+
+  runQueryForSelectedDataset(startISO, endISO);
+};
+
+// ---------------------------------------------------------
+// 9. Quick link buttons
+// ---------------------------------------------------------
+function addDays(date, days) {
+  return new Date(date.getTime() + days * 86400000);
+}
+
+function runQuickRange(days) {
+  const today = new Date();
+  const future = addDays(today, days);
+
+  const startISO = efaStartISO(today.toISOString().split("T")[0]);
+  const endISO = efaEndISO(future.toISOString().split("T")[0]);
+
+  runQueryForSelectedDataset(startISO, endISO);
+}
+
+document.getElementById("last1").onclick = () => runQuickRange(1);
+document.getElementById("last7").onclick = () => runQuickRange(7);
+document.getElementById("last15").onclick = () => runQuickRange(15);
+document.getElementById("last30").onclick = () => runQuickRange(30);
+
+}); // END DOMContentLoaded
+</script>
+
+</body>
+</html>
