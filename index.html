@@ -7,26 +7,52 @@
   body { font-family: Arial, sans-serif; margin: 30px; }
   label { display: inline-block; }
   input[type="date"] { padding: 5px; margin-right: 20px; }
-  button { padding: 6px 12px; margin: 5px; }
+  button { padding: 6px 12px; margin: 5px; cursor: pointer; }
   .downloads div { margin: 10px 0; }
   .downloads a { display: inline-block; margin-top: 5px; margin-right: 10px; }
 
-  /* Vertical list for radio buttons, no wrapping */
   .dataset-option {
     margin-bottom: 10px;
     display: flex;
     align-items: center;
     gap: 8px;
-    white-space: nowrap; /* prevents wrapping */
+    white-space: nowrap;
     font-size: 15px;
   }
 
-  /* Row layout for datepickers */
   .date-row {
     display: flex;
     align-items: center;
     gap: 20px;
     margin-bottom: 15px;
+  }
+
+  .info-line {
+    margin: 10px 0 25px 0;
+    font-size: 14px;
+    color: #444;
+    max-width: 900px;
+  }
+
+  .note-line {
+    margin: 10px 0 20px 0;
+    font-size: 13px;
+    color: #555;
+    max-width: 900px;
+  }
+
+  .product-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 15px 40px;
+    margin: 15px 0 25px 0;
+    max-width: 900px;
+  }
+
+  .product-col label {
+    display: block;
+    margin-bottom: 6px;
+    white-space: nowrap;
   }
 </style>
 </head>
@@ -34,12 +60,21 @@
 
 <h2>NESO EAC Auction Results – EFA Day Extract</h2>
 
-<!-- Dataset radio buttons (vertical list, no wrapping) -->
+<div class="info-line">
+  This tool retrieves publicly available EAC auction data directly from the NESO Data Portal using their open APIs. 
+  All processing occurs entirely within your browser — no data is stored or processed on any server. 
+  You can explore the official datasets at the NESO EAC Auction Results page: 
+  <a href="https://www.neso.energy/data-portal/eac-auction-results" target="_blank">
+    https://www.neso.energy/data-portal/eac-auction-results
+  </a>.
+</div>
+
+<!-- Dataset radio buttons -->
 <div>
   <strong>Select Dataset:</strong><br><br>
 
   <label class="dataset-option">
-    <input type="radio" name="dataset" value="596f29ac-0387-4ba4-a6d3-95c243140707" checked>
+    <input type="radio" name="dataset" value="596f29ac-0387-4ba4-a6d3-95c243140707">
     NESO Response-Reserve Results Summary
   </label>
 
@@ -59,24 +94,68 @@
   </label>
 </div>
 
-<h3>Select EFA Date Range</h3>
+<!-- Auction Product Filter -->
+<h3>Select Auction Products</h3>
 
-<!-- Datepickers in a row -->
+<button id="selectAllBtn">Select All</button>
+<button id="invertBtn">Invert Selection</button>
+
+<div class="product-grid">
+
+  <div class="product-col">
+    <label><input type="checkbox" class="ap" value="DCL" checked> DCL</label>
+    <label><input type="checkbox" class="ap" value="DML" checked> DML</label>
+    <label><input type="checkbox" class="ap" value="DRL" checked> DRL</label>
+  </div>
+
+  <div class="product-col">
+    <label><input type="checkbox" class="ap" value="DCH" checked> DCH</label>
+    <label><input type="checkbox" class="ap" value="DMH" checked> DMH</label>
+    <label><input type="checkbox" class="ap" value="DRH" checked> DRH</label>
+  </div>
+
+  <div class="product-col">
+    <label><input type="checkbox" class="ap" value="PQR" checked> PQR</label>
+    <label><input type="checkbox" class="ap" value="PBR" checked> PBR</label>
+    <label><input type="checkbox" class="ap" value="PSR" checked> PSR</label>
+  </div>
+
+  <div class="product-col">
+    <label><input type="checkbox" class="ap" value="NQR" checked> NQR</label>
+    <label><input type="checkbox" class="ap" value="NBR" checked> NBR</label>
+    <label><input type="checkbox" class="ap" value="NSR" checked> NSR</label>
+  </div>
+
+</div>
+
+<h3>Select EFA Day Range</h3>
+
 <div class="date-row">
-  <label>From (EFA Day):</label>
+  <label>From:</label>
   <input type="date" id="fromDate">
 
-  <label>To (EFA Day):</label>
+  <label>To:</label>
   <input type="date" id="toDate">
 </div>
 
 <button id="downloadBtn">Download Data</button>
 
 <h3>Quick Links</h3>
-<button id="last1">Last 1 EFA Day</button>
+<button id="todayBtn">Today's Results</button>
+<button id="yesterdayBtn">Yesterday's Results</button>
 <button id="last7">Last 7 EFA Days</button>
 <button id="last15">Last 15 EFA Days</button>
 <button id="last30">Last 30 EFA Days</button>
+
+<div class="note-line">
+  EAC auction results are typically published around <strong>3:00 PM UK local time</strong>. 
+  If you use the “Today’s Results” button before publication time, the output may be empty — 
+  in that case, please use the “Yesterday’s Results” button instead.  
+  Likewise, the quick‑link ranges (Last 7, 15, or 30 EFA Days) always count backwards from 
+  tomorrow’s EFA day end, but if the most recent EFA day has not yet been published, the 
+  returned range may contain one fewer day than expected. This simply reflects the 
+  publication schedule.
+</div>
 
 <h2>Results</h2>
 <div id="resourceLinks" class="downloads"></div>
@@ -85,11 +164,10 @@
 document.addEventListener("DOMContentLoaded", () => {
 
 // ---------------------------------------------------------
-// 1. UK-local → ISO8601 converter (BST/GMT safe)
+// UK-local → ISO8601 converter
 // ---------------------------------------------------------
 function makeUKDateISO(dateStr, hour, minute) {
   const [y, m, d] = dateStr.split("-").map(Number);
-
   const utc = new Date(Date.UTC(y, m - 1, d, hour, minute));
 
   const ukOffsetMinutes = new Date(
@@ -97,20 +175,14 @@ function makeUKDateISO(dateStr, hour, minute) {
   ).getTimezoneOffset();
 
   const ukTime = new Date(utc.getTime() - ukOffsetMinutes * 60000);
-
   return ukTime.toISOString();
 }
 
-function efaStartISO(dateStr) {
-  return makeUKDateISO(dateStr, 22, 0);
-}
-
-function efaEndISO(dateStr) {
-  return makeUKDateISO(dateStr, 21, 30);
-}
+function efaStartISO(dateStr) { return makeUKDateISO(dateStr, 22, 0); }
+function efaEndISO(dateStr)   { return makeUKDateISO(dateStr, 21, 30); }
 
 // ---------------------------------------------------------
-// 2. Datepicker limits (last 4 years → tomorrow)
+// Datepicker limits
 // ---------------------------------------------------------
 const today = new Date();
 const tomorrow = new Date(today.getTime() + 86400000);
@@ -124,48 +196,50 @@ const toInput = document.getElementById("toDate");
 
 fromInput.max = maxDate;
 toInput.max = maxDate;
-
 fromInput.min = minDate;
 toInput.min = minDate;
 
-// ---------------------------------------------------------
-// 3. Default datepickers = today/tomorrow
-// ---------------------------------------------------------
-fromInput.value = today.toISOString().split("T")[0];
+// Default both datepickers to tomorrow's EFA date
+fromInput.value = maxDate;
 toInput.value = maxDate;
 
 // ---------------------------------------------------------
-// 4. Dynamic min/max logic
+// Dataset selection helper
 // ---------------------------------------------------------
+function getSelectedDataset() {
+  return document.querySelector("input[name='dataset']:checked");
+}
 
+// ---------------------------------------------------------
+// Select All / Invert Selection
+// ---------------------------------------------------------
+document.getElementById("selectAllBtn").onclick = () => {
+  document.querySelectorAll(".ap").forEach(cb => cb.checked = true);
+};
+
+document.getElementById("invertBtn").onclick = () => {
+  document.querySelectorAll(".ap").forEach(cb => cb.checked = !cb.checked);
+};
+
+// ---------------------------------------------------------
+// Dynamic min/max logic
+// ---------------------------------------------------------
 fromInput.addEventListener("change", () => {
-  const from = new Date(fromInput.value);
-  if (isNaN(from)) return;
-
-  const minTo = new Date(from.getTime() + 86400000);
-  toInput.min = minTo.toISOString().split("T")[0];
-  toInput.max = maxDate;
-
-  if (new Date(toInput.value) < minTo) {
-    toInput.value = minTo.toISOString().split("T")[0];
+  toInput.min = fromInput.value;
+  if (toInput.value < fromInput.value) {
+    toInput.value = fromInput.value;
   }
 });
 
 toInput.addEventListener("change", () => {
-  const to = new Date(toInput.value);
-  if (isNaN(to)) return;
-
-  const maxFrom = new Date(to.getTime() - 86400000);
-  fromInput.max = maxFrom.toISOString().split("T")[0];
-  fromInput.min = minDate;
-
-  if (new Date(fromInput.value) > maxFrom) {
-    fromInput.value = maxFrom.toISOString().split("T")[0];
+  fromInput.max = toInput.value;
+  if (fromInput.value > toInput.value) {
+    fromInput.value = toInput.value;
   }
 });
 
 // ---------------------------------------------------------
-// 5. JSON → CSV converter
+// JSON → CSV converter
 // ---------------------------------------------------------
 function jsonToCsv(records) {
   if (!records || records.length === 0) return "";
@@ -174,30 +248,184 @@ function jsonToCsv(records) {
   const escape = (value) => {
     if (value === null || value === undefined) return "";
     const str = String(value);
-    if (/[",\n\r]/.test(str)) {
-      return '"' + str.replace(/"/g, '""') + '"';
-    }
+    if (/[",\n\r]/.test(str)) return '"' + str.replace(/"/g, '""') + '"';
     return str;
   };
 
   const lines = [];
   lines.push(headers.join(","));
   for (const row of records) {
-    const line = headers.map(h => escape(row[h])).join(",");
-    lines.push(line);
+    lines.push(headers.map(h => escape(row[h])).join(","));
   }
   return lines.join("\r\n");
 }
 
 // ---------------------------------------------------------
-// 6. SQL query (fast SELECT *)
+// SQL query builder with auctionProduct filter
 // ---------------------------------------------------------
-function runQuery(resourceId, startISO, endISO) {
-  const sql = `
+function buildSQL(resourceId, startISO, endISO, products) {
+  const inClause = products.map(p => `'${p}'`).join(",");
+
+  // Results Summary
+  if (resourceId === "596f29ac-0387-4ba4-a6d3-95c243140707") {
+    return `
+      SELECT
+        "auctionID",
+        "auctionProduct",
+        "serviceType",
+        "deliveryStart",
+        "deliveryEnd",
+        "clearedVolume",
+        "clearingPrice",
+        "linkedServiceWindowID"
+      FROM "${resourceId}"
+      WHERE "deliveryStart" BETWEEN '${startISO}' AND '${endISO}'
+        AND "auctionProduct" IN (${inClause})
+    `;
+  }
+
+  // Buy Orders
+  if (resourceId === "1cf68f59-8eb8-4f1d-bccf-11b5a47b24e5") {
+    return `
+      SELECT
+        "auctionID",
+        "orderID",
+        "serviceType",
+        "auctionProduct",
+        "deliveryStart",
+        "deliveryEnd",
+        "quantity",
+        "price",
+        "substitutabilityFamily",
+        "paradoxicallyAcceptanceAllowed",
+        "orderEntryTime",
+        "acceptanceRatio",
+        "status",
+        "executedQuantity",
+        "clearingPrice",
+        "reasonRejected",
+        "joinedFamily"
+      FROM "${resourceId}"
+      WHERE "deliveryStart" BETWEEN '${startISO}' AND '${endISO}'
+        AND "auctionProduct" IN (${inClause})
+    `;
+  }
+
+  // Sell Orders
+  if (resourceId === "13b511df-d6ec-4143-afb1-0ecc6fd19810") {
+    return `
+      SELECT
+        "auctionID",
+        "registeredAuctionParticipant",
+        "auctionUnit",
+        "basketID",
+        "serviceType",
+        "deliveryStart",
+        "deliveryEnd",
+        "orderID",
+        "orderType",
+        "auctionProduct",
+        "productID",
+        "quantity",
+        "priceLimit",
+        "loopedBasketID",
+        "orderEntryTime",
+        "acceptanceRatio",
+        "status",
+        "executedQuantity",
+        "clearingPrice",
+        "reasonRejected",
+        "flexibleGroupID",
+        "minimumConsecutiveWindows"
+      FROM "${resourceId}"
+      WHERE "deliveryStart" BETWEEN '${startISO}' AND '${endISO}'
+        AND "auctionProduct" IN (${inClause})
+    `;
+  }
+
+  // Results By Unit
+  if (resourceId === "a63ab354-7e68-44c2-ad96-c6f920c30e85") {
+    return `
+      SELECT
+        "registeredAuctionParticipant",
+        "auctionUnit",
+        "serviceType",
+        "auctionProduct",
+        "executedQuantity",
+        "clearingPrice",
+        "deliveryStart",
+        "deliveryEnd",
+        "technologyType",
+        "postCode",
+        "unitResultID"
+      FROM "${resourceId}"
+      WHERE "deliveryStart" BETWEEN '${startISO}' AND '${endISO}'
+        AND "auctionProduct" IN (${inClause})
+    `;
+  }
+
+  // Default
+  return `
     SELECT *
     FROM "${resourceId}"
     WHERE "deliveryStart" BETWEEN '${startISO}' AND '${endISO}'
+      AND "auctionProduct" IN (${inClause})
   `;
+}
+
+// ---------------------------------------------------------
+// Field ordering helpers
+// ---------------------------------------------------------
+function getFieldOrder(resourceId) {
+
+  if (resourceId === "596f29ac-0387-4ba4-a6d3-95c243140707") {
+    return [
+      "auctionID","auctionProduct","serviceType","deliveryStart","deliveryEnd",
+      "clearedVolume","clearingPrice","linkedServiceWindowID"
+    ];
+  }
+
+  if (resourceId === "1cf68f59-8eb8-4f1d-bccf-11b5a47b24e5") {
+    return [
+      "auctionID","orderID","serviceType","auctionProduct","deliveryStart","deliveryEnd",
+      "quantity","price","substitutabilityFamily","paradoxicallyAcceptanceAllowed",
+      "orderEntryTime","acceptanceRatio","status","executedQuantity","clearingPrice",
+      "reasonRejected","joinedFamily"
+    ];
+  }
+
+  if (resourceId === "13b511df-d6ec-4143-afb1-0ecc6fd19810") {
+    return [
+      "auctionID","registeredAuctionParticipant","auctionUnit","basketID","serviceType",
+      "deliveryStart","deliveryEnd","orderID","orderType","auctionProduct","productID",
+      "quantity","priceLimit","loopedBasketID","orderEntryTime","acceptanceRatio",
+      "status","executedQuantity","clearingPrice","reasonRejected","flexibleGroupID",
+      "minimumConsecutiveWindows"
+    ];
+  }
+
+  if (resourceId === "a63ab354-7e68-44c2-ad96-c6f920c30e85") {
+    return [
+      "registeredAuctionParticipant","auctionUnit","serviceType","auctionProduct",
+      "executedQuantity","clearingPrice","deliveryStart","deliveryEnd","technologyType",
+      "postCode","unitResultID"
+    ];
+  }
+
+  return null;
+}
+
+function reorderRecord(record, orderedFields) {
+  const out = {};
+  orderedFields.forEach(f => out[f] = record[f] ?? "");
+  return out;
+}
+
+// ---------------------------------------------------------
+// Run query + build download links
+// ---------------------------------------------------------
+function runQuery(resourceId, startISO, endISO, products) {
+  const sql = buildSQL(resourceId, startISO, endISO, products);
 
   return fetch(
     "https://api.neso.energy/api/3/action/datastore_search_sql?sql=" +
@@ -208,19 +436,21 @@ function runQuery(resourceId, startISO, endISO) {
     .catch(err => ({ error: err.message }));
 }
 
-// ---------------------------------------------------------
-// 7. Run query + build download links
-// ---------------------------------------------------------
-function runQueryForSelectedDataset(startISO, endISO) {
+function runQueryForSelectedDataset(startISO, endISO, products) {
   const container = document.getElementById("resourceLinks");
   container.innerHTML = `<p>Fetching data for ${startISO} → ${endISO}...</p>`;
 
-  const selected = document.querySelector("input[name='dataset']:checked");
+  const selected = getSelectedDataset();
+  if (!selected) {
+    alert("Please select a dataset.");
+    container.innerHTML = "";
+    return;
+  }
+
   const resourceId = selected.value;
   const resourceName = selected.parentNode.innerText.trim();
-  const safeName = resourceName;
 
-  runQuery(resourceId, startISO, endISO).then(result => {
+  runQuery(resourceId, startISO, endISO, products).then(result => {
     container.innerHTML = "";
 
     if (result.error) {
@@ -230,10 +460,12 @@ function runQueryForSelectedDataset(startISO, endISO) {
 
     if (result.records && result.records.length > 0) {
 
+      const fieldOrder = getFieldOrder(resourceId);
+
       const cleanedRecords = result.records.map(r => {
         const copy = { ...r };
         delete copy._full_text;
-        return copy;
+        return fieldOrder ? reorderRecord(copy, fieldOrder) : copy;
       });
 
       const jsonBlob = new Blob(
@@ -241,31 +473,59 @@ function runQueryForSelectedDataset(startISO, endISO) {
         { type: "application/json" }
       );
       const jsonUrl = URL.createObjectURL(jsonBlob);
-      const jsonFileName = `${safeName}_${startISO}_${endISO}.json`;
+      const jsonFileName = `${resourceName}_${startISO}_${endISO}.json`;
 
       const csvText = jsonToCsv(cleanedRecords);
       const csvBlob = new Blob([csvText], { type: "text/csv;charset=utf-8;" });
       const csvUrl = URL.createObjectURL(csvBlob);
-      const csvFileName = `${safeName}_${startISO}_${endISO}.csv`;
+      const csvFileName = `${resourceName}_${startISO}_${endISO}.csv`;
 
       container.innerHTML = `
         <div>
           <strong>${resourceName}</strong><br>
-          Records: ${cleanedRecords.length}<br>
+          <span style="font-size: 13px; color: #444;">
+            From: <strong>${startISO}</strong><br>
+            To: <strong>${endISO}</strong><br>
+            Rows returned: <strong>${cleanedRecords.length}</strong>
+          </span><br><br>
           <a href="${jsonUrl}" download="${jsonFileName}">Download JSON</a>
           <a href="${csvUrl}" download="${csvFileName}">Download CSV</a>
         </div>
       `;
     } else {
-      container.innerHTML = `<div><strong>${resourceName}:</strong> No data for this EFA range.</div>`;
+      container.innerHTML = `
+        <div>
+          <strong>${resourceName}</strong><br>
+          <span style="font-size: 13px; color: #444;">
+            From: <strong>${startISO}</strong><br>
+            To: <strong>${endISO}</strong><br>
+            Rows returned: <strong>0</strong>
+          </span><br><br>
+          No data for this range.
+        </div>
+      `;
     }
   });
 }
 
 // ---------------------------------------------------------
-// 8. Download button (with validation)
+// Download button
 // ---------------------------------------------------------
 document.getElementById("downloadBtn").onclick = () => {
+
+  const selected = getSelectedDataset();
+  if (!selected) {
+    alert("Please select a dataset.");
+    return;
+  }
+
+  const products = [...document.querySelectorAll(".ap:checked")].map(cb => cb.value);
+
+  if (products.length === 0) {
+    alert("Please select at least one auction product.");
+    return;
+  }
+
   const from = fromInput.value;
   const to = toInput.value;
 
@@ -277,38 +537,92 @@ document.getElementById("downloadBtn").onclick = () => {
   const fromD = new Date(from);
   const toD = new Date(to);
 
-  if (fromD >= toD) {
-    alert("EFA rule: To date must be at least 1 day after From date.");
+  if (fromD > toD) {
+    alert("From date cannot be after To date.");
     return;
   }
 
-  const startISO = efaStartISO(from);
-  const endISO = efaEndISO(to);
+  let startISO, endISO;
 
-  runQueryForSelectedDataset(startISO, endISO);
+  if (from === to) {
+    const prev = new Date(fromD.getTime() - 86400000);
+    startISO = efaStartISO(prev.toISOString().split("T")[0]);
+    endISO = efaEndISO(to);
+  } else {
+    startISO = efaStartISO(from);
+    endISO = efaEndISO(to);
+  }
+
+  runQueryForSelectedDataset(startISO, endISO, products);
 };
 
 // ---------------------------------------------------------
-// 9. Quick link buttons
+// Corrected Quick Link Buttons (exact N EFA days)
 // ---------------------------------------------------------
-function addDays(date, days) {
-  return new Date(date.getTime() + days * 86400000);
-}
-
 function runQuickRange(days) {
+  const selected = getSelectedDataset();
+  if (!selected) {
+    alert("Please select a dataset.");
+    return;
+  }
+
+  const products = [...document.querySelectorAll(".ap:checked")].map(cb => cb.value);
+  if (products.length === 0) return alert("Please select at least one auction product.");
+
   const today = new Date();
-  const future = addDays(today, days);
+  const tomorrow = new Date(today.getTime() + 86400000);
 
-  const startISO = efaStartISO(today.toISOString().split("T")[0]);
-  const endISO = efaEndISO(future.toISOString().split("T")[0]);
+  const endISO = efaEndISO(tomorrow.toISOString().split("T")[0]);
+  const startCalendar = new Date(tomorrow.getTime() - days * 86400000);
+  const startISO = efaStartISO(startCalendar.toISOString().split("T")[0]);
 
-  runQueryForSelectedDataset(startISO, endISO);
+  runQueryForSelectedDataset(startISO, endISO, products);
 }
 
-document.getElementById("last1").onclick = () => runQuickRange(1);
 document.getElementById("last7").onclick = () => runQuickRange(7);
 document.getElementById("last15").onclick = () => runQuickRange(15);
 document.getElementById("last30").onclick = () => runQuickRange(30);
+
+// ---------------------------------------------------------
+// Today / Yesterday Buttons
+// ---------------------------------------------------------
+document.getElementById("todayBtn").onclick = () => {
+  const selected = getSelectedDataset();
+  if (!selected) {
+    alert("Please select a dataset.");
+    return;
+  }
+
+  const products = [...document.querySelectorAll(".ap:checked")].map(cb => cb.value);
+  if (products.length === 0) return alert("Please select at least one auction product.");
+
+  const today = new Date();
+  const tomorrow = new Date(today.getTime() + 86400000);
+
+  const startISO = efaStartISO(today.toISOString().split("T")[0]);
+  const endISO   = efaEndISO(tomorrow.toISOString().split("T")[0]);
+
+  runQueryForSelectedDataset(startISO, endISO, products);
+};
+
+document.getElementById("yesterdayBtn").onclick = () => {
+  const selected = getSelectedDataset();
+  if (!selected) {
+    alert("Please select a dataset.");
+    return;
+  }
+
+  const products = [...document.querySelectorAll(".ap:checked")].map(cb => cb.value);
+  if (products.length === 0) return alert("Please select at least one auction product.");
+
+  const today = new Date();
+  const yesterday = new Date(today.getTime() - 86400000);
+
+  const startISO = efaStartISO(yesterday.toISOString().split("T")[0]);
+  const endISO   = efaEndISO(today.toISOString().split("T")[0]);
+
+  runQueryForSelectedDataset(startISO, endISO, products);
+};
 
 }); // END DOMContentLoaded
 </script>
