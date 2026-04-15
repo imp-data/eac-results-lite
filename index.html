@@ -163,56 +163,96 @@
 <script>
 document.addEventListener("DOMContentLoaded", () => {
 
-// ---------------------------------------------------------
-// UK-local → ISO8601 converter
-// ---------------------------------------------------------
-function makeUKDateISO(dateStr, hour, minute) {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const utc = new Date(Date.UTC(y, m - 1, d, hour, minute));
+//
+// ─────────────────────────────────────────────────────────────
+//  UK DST (BST/GMT) DETECTION
+// ─────────────────────────────────────────────────────────────
+//
+function isBST(dateStr) {
+  const d = new Date(dateStr + "T12:00:00");
 
-  const ukOffsetMinutes = new Date(
-    utc.toLocaleString("en-US", { timeZone: "Europe/London" })
-  ).getTimezoneOffset();
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London",
+    timeZoneName: "short"
+  }).formatToParts(d);
 
-  const ukTime = new Date(utc.getTime() - ukOffsetMinutes * 60000);
-  return ukTime.toISOString();
+  const tz = parts.find(p => p.type === "timeZoneName");
+  return tz && tz.value === "BST";
 }
 
-function efaStartISO(dateStr) { return makeUKDateISO(dateStr, 22, 0); }
-function efaEndISO(dateStr)   { return makeUKDateISO(dateStr, 21, 30); }
+//
+// ─────────────────────────────────────────────────────────────
+//  Convert a date + UTC hour into ISO string
+// ─────────────────────────────────────────────────────────────
+//
+function makeUKDateISO(dateStr, hourUTC, minuteUTC) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d, hourUTC, minuteUTC)).toISOString();
+}
 
-// ---------------------------------------------------------
-// Datepicker limits
-// ---------------------------------------------------------
+//
+// ─────────────────────────────────────────────────────────────
+//  CORRECT EFA DAY LOGIC
+//  EFA day = 23:00 UK local (previous day) → 22:30 UK local (same day)
+// ─────────────────────────────────────────────────────────────
+//
+function efaStartISO(dateStr) {
+  // Start is on the previous calendar day
+  const d = new Date(dateStr);
+  d.setDate(d.getDate() - 1);
+  const prevStr = d.toISOString().split("T")[0];
+
+  // Use DST status of the *previous* day
+  const bstPrev = isBST(prevStr);
+
+  // UK local start = 23:00 previous day
+  //   GMT: 23:00 → 23:00 UTC
+  //   BST: 23:00 → 22:00 UTC
+  const utcHour = bstPrev ? 22 : 23;
+
+  return makeUKDateISO(prevStr, utcHour, 0);
+}
+
+function efaEndISO(dateStr) {
+  // End is on the given day
+  const bst = isBST(dateStr);
+
+  // UK local end = 22:30 same day
+  //   GMT: 22:30 → 22:30 UTC
+  //   BST: 22:30 → 21:30 UTC
+  const utcHour = bst ? 21 : 22;
+
+  return makeUKDateISO(dateStr, utcHour, 30);
+}
+
+//
+// ─────────────────────────────────────────────────────────────
+//  DATE LIMITS, UI LOGIC, PRODUCT SELECTION
+// ─────────────────────────────────────────────────────────────
+//
+
 const today = new Date();
 const tomorrow = new Date(today.getTime() + 86400000);
-const fourYearsAgo = new Date(today.getTime() - 4 * 365 * 86400000);
+// Hard minimum date for NESO EAC data
+const minAllowedDate = "2023-11-03";
 
 const maxDate = tomorrow.toISOString().split("T")[0];
-const minDate = fourYearsAgo.toISOString().split("T")[0];
 
 const fromInput = document.getElementById("fromDate");
 const toInput = document.getElementById("toDate");
 
 fromInput.max = maxDate;
 toInput.max = maxDate;
-fromInput.min = minDate;
-toInput.min = minDate;
+fromInput.min = minAllowedDate;
+toInput.min = minAllowedDate;
 
-// Default both datepickers to tomorrow's EFA date
 fromInput.value = maxDate;
 toInput.value = maxDate;
 
-// ---------------------------------------------------------
-// Dataset selection helper
-// ---------------------------------------------------------
 function getSelectedDataset() {
   return document.querySelector("input[name='dataset']:checked");
 }
 
-// ---------------------------------------------------------
-// Select All / Invert Selection
-// ---------------------------------------------------------
 document.getElementById("selectAllBtn").onclick = () => {
   document.querySelectorAll(".ap").forEach(cb => cb.checked = true);
 };
@@ -221,9 +261,6 @@ document.getElementById("invertBtn").onclick = () => {
   document.querySelectorAll(".ap").forEach(cb => cb.checked = !cb.checked);
 };
 
-// ---------------------------------------------------------
-// Dynamic min/max logic
-// ---------------------------------------------------------
 fromInput.addEventListener("change", () => {
   toInput.min = fromInput.value;
   if (toInput.value < fromInput.value) {
@@ -238,9 +275,11 @@ toInput.addEventListener("change", () => {
   }
 });
 
-// ---------------------------------------------------------
-// JSON → CSV converter
-// ---------------------------------------------------------
+//
+// ─────────────────────────────────────────────────────────────
+//  JSON → CSV
+// ─────────────────────────────────────────────────────────────
+//
 function jsonToCsv(records) {
   if (!records || records.length === 0) return "";
 
@@ -260,13 +299,14 @@ function jsonToCsv(records) {
   return lines.join("\r\n");
 }
 
-// ---------------------------------------------------------
-// SQL query builder with auctionProduct filter
-// ---------------------------------------------------------
+//
+// ─────────────────────────────────────────────────────────────
+//  SQL BUILDER
+// ─────────────────────────────────────────────────────────────
+//
 function buildSQL(resourceId, startISO, endISO, products) {
   const inClause = products.map(p => `'${p}'`).join(",");
 
-  // Results Summary
   if (resourceId === "596f29ac-0387-4ba4-a6d3-95c243140707") {
     return `
       SELECT
@@ -284,7 +324,6 @@ function buildSQL(resourceId, startISO, endISO, products) {
     `;
   }
 
-  // Buy Orders
   if (resourceId === "1cf68f59-8eb8-4f1d-bccf-11b5a47b24e5") {
     return `
       SELECT
@@ -311,7 +350,6 @@ function buildSQL(resourceId, startISO, endISO, products) {
     `;
   }
 
-  // Sell Orders
   if (resourceId === "13b511df-d6ec-4143-afb1-0ecc6fd19810") {
     return `
       SELECT
@@ -343,7 +381,6 @@ function buildSQL(resourceId, startISO, endISO, products) {
     `;
   }
 
-  // Results By Unit
   if (resourceId === "a63ab354-7e68-44c2-ad96-c6f920c30e85") {
     return `
       SELECT
@@ -364,7 +401,6 @@ function buildSQL(resourceId, startISO, endISO, products) {
     `;
   }
 
-  // Default
   return `
     SELECT *
     FROM "${resourceId}"
@@ -373,11 +409,12 @@ function buildSQL(resourceId, startISO, endISO, products) {
   `;
 }
 
-// ---------------------------------------------------------
-// Field ordering helpers
-// ---------------------------------------------------------
+//
+// ─────────────────────────────────────────────────────────────
+//  FIELD ORDERING
+// ─────────────────────────────────────────────────────────────
+//
 function getFieldOrder(resourceId) {
-
   if (resourceId === "596f29ac-0387-4ba4-a6d3-95c243140707") {
     return [
       "auctionID","auctionProduct","serviceType","deliveryStart","deliveryEnd",
@@ -421,9 +458,11 @@ function reorderRecord(record, orderedFields) {
   return out;
 }
 
-// ---------------------------------------------------------
-// Run query + build download links
-// ---------------------------------------------------------
+//
+// ─────────────────────────────────────────────────────────────
+//  QUERY EXECUTION + DOWNLOAD LINKS
+// ─────────────────────────────────────────────────────────────
+//
 function runQuery(resourceId, startISO, endISO, products) {
   const sql = buildSQL(resourceId, startISO, endISO, products);
 
@@ -508,9 +547,11 @@ function runQueryForSelectedDataset(startISO, endISO, products) {
   });
 }
 
-// ---------------------------------------------------------
-// Download button
-// ---------------------------------------------------------
+//
+// ─────────────────────────────────────────────────────────────
+//  DOWNLOAD BUTTON
+// ─────────────────────────────────────────────────────────────
+//
 document.getElementById("downloadBtn").onclick = () => {
 
   const selected = getSelectedDataset();
@@ -545,8 +586,7 @@ document.getElementById("downloadBtn").onclick = () => {
   let startISO, endISO;
 
   if (from === to) {
-    const prev = new Date(fromD.getTime() - 86400000);
-    startISO = efaStartISO(prev.toISOString().split("T")[0]);
+    startISO = efaStartISO(from);
     endISO = efaEndISO(to);
   } else {
     startISO = efaStartISO(from);
@@ -556,15 +596,18 @@ document.getElementById("downloadBtn").onclick = () => {
   runQueryForSelectedDataset(startISO, endISO, products);
 };
 
-// ---------------------------------------------------------
-// Corrected Quick Link Buttons (exact N EFA days)
-// ---------------------------------------------------------
-function runQuickRange(days) {
+//
+// ─────────────────────────────────────────────────────────────
+//  QUICK RANGE BUTTONS
+// ─────────────────────────────────────────────────────────────
+//
+
+//
+// TODAY'S RESULTS  (auction for tomorrow)
+//
+document.getElementById("todayBtn").onclick = () => {
   const selected = getSelectedDataset();
-  if (!selected) {
-    alert("Please select a dataset.");
-    return;
-  }
+  if (!selected) return alert("Please select a dataset.");
 
   const products = [...document.querySelectorAll(".ap:checked")].map(cb => cb.value);
   if (products.length === 0) return alert("Please select at least one auction product.");
@@ -572,9 +615,57 @@ function runQuickRange(days) {
   const today = new Date();
   const tomorrow = new Date(today.getTime() + 86400000);
 
-  const endISO = efaEndISO(tomorrow.toISOString().split("T")[0]);
-  const startCalendar = new Date(tomorrow.getTime() - days * 86400000);
-  const startISO = efaStartISO(startCalendar.toISOString().split("T")[0]);
+  const tomorrowStr = tomorrow.toISOString().split("T")[0];
+
+  const startISO = efaStartISO(tomorrowStr);   // 23:00 UK previous day → UTC
+  const endISO   = efaEndISO(tomorrowStr);     // 22:30 UK tomorrow → UTC
+
+  runQueryForSelectedDataset(startISO, endISO, products);
+};
+
+
+//
+// YESTERDAY'S RESULTS  (auction for today)
+//
+document.getElementById("yesterdayBtn").onclick = () => {
+  const selected = getSelectedDataset();
+  if (!selected) return alert("Please select a dataset.");
+
+  const products = [...document.querySelectorAll(".ap:checked")].map(cb => cb.value);
+  if (products.length === 0) return alert("Please select at least one auction product.");
+
+  const today = new Date();
+  const todayStr = today.toISOString().split("T")[0];
+
+  const startISO = efaStartISO(todayStr);   // 23:00 UK previous day → UTC
+  const endISO   = efaEndISO(todayStr);     // 22:30 UK today → UTC
+
+  runQueryForSelectedDataset(startISO, endISO, products);
+};
+
+
+//
+// LAST N DAYS (latest auction day = tomorrow)
+//
+function runQuickRange(days) {
+  const selected = getSelectedDataset();
+  if (!selected) return alert("Please select a dataset.");
+
+  const products = [...document.querySelectorAll(".ap:checked")].map(cb => cb.value);
+  if (products.length === 0) return alert("Please select at least one auction product.");
+
+  const today = new Date();
+  const tomorrow = new Date(today.getTime() + 86400000);
+
+  // Latest auction day = tomorrow
+  const latestStr = tomorrow.toISOString().split("T")[0];
+
+  // Earliest auction day = tomorrow - (days - 1)
+  const earliest = new Date(tomorrow.getTime() - (days - 1) * 86400000);
+  const earliestStr = earliest.toISOString().split("T")[0];
+
+  const startISO = efaStartISO(earliestStr);
+  const endISO   = efaEndISO(latestStr);
 
   runQueryForSelectedDataset(startISO, endISO, products);
 }
@@ -582,47 +673,6 @@ function runQuickRange(days) {
 document.getElementById("last7").onclick = () => runQuickRange(7);
 document.getElementById("last15").onclick = () => runQuickRange(15);
 document.getElementById("last30").onclick = () => runQuickRange(30);
-
-// ---------------------------------------------------------
-// Today / Yesterday Buttons
-// ---------------------------------------------------------
-document.getElementById("todayBtn").onclick = () => {
-  const selected = getSelectedDataset();
-  if (!selected) {
-    alert("Please select a dataset.");
-    return;
-  }
-
-  const products = [...document.querySelectorAll(".ap:checked")].map(cb => cb.value);
-  if (products.length === 0) return alert("Please select at least one auction product.");
-
-  const today = new Date();
-  const tomorrow = new Date(today.getTime() + 86400000);
-
-  const startISO = efaStartISO(today.toISOString().split("T")[0]);
-  const endISO   = efaEndISO(tomorrow.toISOString().split("T")[0]);
-
-  runQueryForSelectedDataset(startISO, endISO, products);
-};
-
-document.getElementById("yesterdayBtn").onclick = () => {
-  const selected = getSelectedDataset();
-  if (!selected) {
-    alert("Please select a dataset.");
-    return;
-  }
-
-  const products = [...document.querySelectorAll(".ap:checked")].map(cb => cb.value);
-  if (products.length === 0) return alert("Please select at least one auction product.");
-
-  const today = new Date();
-  const yesterday = new Date(today.getTime() - 86400000);
-
-  const startISO = efaStartISO(yesterday.toISOString().split("T")[0]);
-  const endISO   = efaEndISO(today.toISOString().split("T")[0]);
-
-  runQueryForSelectedDataset(startISO, endISO, products);
-};
 
 }); // END DOMContentLoaded
 </script>
